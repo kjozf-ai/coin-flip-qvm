@@ -40,9 +40,14 @@ function getAdminWallet(): ethers.Wallet {
   // 0x prefix hozzáadása ha hiányzik
   const privateKey = rawKey.startsWith("0x") ? rawKey : `0x${rawKey}`;
 
+  // batchMaxCount: 1 — letiltja a batch JSON-RPC kéréseket.
+  // A QAN TestNet RPC nem támogatja a tömbös (batch) kéréseket,
+  // csak egyedi JSON-RPC objektumokat fogad el.
   provider = new ethers.JsonRpcProvider(QAN_TESTNET_RPC, {
     chainId: CHAIN_ID,
     name: "QAN TestNet",
+  }, {
+    batchMaxCount: 1,
   });
 
   adminWallet = new ethers.Wallet(privateKey, provider);
