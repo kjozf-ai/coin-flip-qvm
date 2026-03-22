@@ -229,7 +229,25 @@ function GameLobby({ selectedContract }: { selectedContract: ContractType }) {
       queryClient.invalidateQueries({ queryKey: ["/api/rounds/current"] });
       queryClient.invalidateQueries({ queryKey: ["/api/events"] });
       queryClient.invalidateQueries({ queryKey: ["/api/leaderboard"] });
-      toast({ title: "Nyeremény igényelve", description: `${data.amount} QANX` });
+
+      if (data.blockchainTransfer && data.txHash) {
+        // Valódi blokklánc átutalás történt
+        toast({
+          title: "✅ QANX átküldve a tárcádra!",
+          description: `${data.amount} QANX | Tx: ${data.txHash.slice(0, 10)}...${data.txHash.slice(-6)}`,
+        });
+        // Megnyitjuk a block explorert
+        window.open(
+          `https://testnet.qanscan.com/tx/${data.txHash}`,
+          "_blank"
+        );
+      } else {
+        // Fallback mód (nincs ADMIN_PRIVATE_KEY)
+        toast({
+          title: "Nyeremény rögzítve",
+          description: `${data.amount} QANX — ${data.message}`,
+        });
+      }
     },
     onError: (err: Error) => {
       toast({ title: "Hiba", description: err.message, variant: "destructive" });
@@ -275,7 +293,7 @@ function GameLobby({ selectedContract }: { selectedContract: ContractType }) {
                   size="sm"
                   className="mt-2 bg-green-600 hover:bg-green-700"
                 >
-                  {claimPrize.isPending ? "Feldolgozás..." : `🏆 Nyeremény igénylése (${claimInfo.amount} QANX)`}
+                  {claimPrize.isPending ? "⏳ Blokklánc-tranzakció folyamatban..." : `🏆 Nyeremény igénylése (${claimInfo.amount} QANX)`}
                 </Button>
               </div>
             )}

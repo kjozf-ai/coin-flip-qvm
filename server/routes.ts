@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { randomBytes } from "crypto";
 import { storage } from "./storage";
+import { sendPrize, isBlockchainEnabled, getAdminBalance } from "./blockchain";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -205,25 +206,57 @@ export async function registerRoutes(
     if (!bet.won) return res.status(400).json({ error: "Nem nyertél ebben a körben" });
     if (bet.claimed) return res.status(400).json({ error: "Már igényelted a nyereményt" });
 
-    // Mark as claimed
-    storage.updateBet(bet.id, { claimed: 1 });
+    const prizeAmount = round.prizePerWinner || "0";
+    let claimTxHash: string | null = null;
+    let blockchainSuccess = false;
+
+    // ── Valódi QANX átutalás ha ADMIN_PRIVATE_KEY be van állítva ─────────
+    if (isBlockchainEnabled()) {
+      try {
+        claimTxHash = await sendPrize(playerAddress, prizeAmount);
+        blockchainSuccess = true;
+        console.log(`[claim] Sikeres QANX átutalás: ${prizeAmount} QANX → ${playerAddress} | tx: ${claimTxHash}`);
+      } catch (err: any) {
+        console.error(`[claim] Blokklánc átutalás sikertelen:`, err.message);
+        return res.status(500).json({
+          error: `Blokklánc átutalás sikertelen: ${err.message}`,
+          blockchainEnabled: true,
+        });
+      }
+    } else {
+      console.warn(`[claim] ADMIN_PRIVATE_KEY nincs beállítva — csak DB-frissítés történik (fallback mód)`);
+    }
+
+    // ── DB frissítés ───────────────────────────────────────────────────────
+    storage.updateBet(bet.id, {
+      claimed: 1,
+      claimTxHash: claimTxHash,
+    });
 
     // Update unclaimed amount in round
-    const unclaimed = parseFloat(round.unclaimedPrize || "0") - parseFloat(round.prizePerWinner || "0");
+    const unclaimed = parseFloat(round.unclaimedPrize || "0") - parseFloat(prizeAmount);
     storage.updateRound(roundId, { unclaimedPrize: Math.max(0, unclaimed).toFixed(4) });
 
     storage.createEvent({
       type: "PrizeClaimed",
       roundId,
       playerAddress,
-      data: JSON.stringify({ amount: round.prizePerWinner }),
+      data: JSON.stringify({
+        amount: prizeAmount,
+        txHash: claimTxHash,
+        blockchainTransfer: blockchainSuccess,
+      }),
       timestamp: Date.now(),
     });
 
     res.json({
       success: true,
-      amount: round.prizePerWinner,
-      message: `${round.prizePerWinner} QANX nyeremény igényelve!`,
+      amount: prizeAmount,
+      txHash: claimTxHash,
+      blockchainTransfer: blockchainSuccess,
+      message: blockchainSuccess
+        ? `${prizeAmount} QANX sikeresen átküldve a tárcádra! Tx: ${claimTxHash}`
+        : `${prizeAmount} QANX nyeremény rögzítve (blokklánc-küldés nem aktív — ADMIN_PRIVATE_KEY szükséges)`,
     });
   });
 
@@ -280,6 +313,24 @@ export async function registerRoutes(
   app.get("/api/events", async (_req, res) => {
     const limit = parseInt(_req.query.limit as string) || 50;
     res.json(storage.getRecentEvents(limit));
+  });
+
+  // ── Admin: blokklánc státusz és egyenleg ──────────────────────────────
+  app.get("/api/admin/balance", async (_req, res) => {
+    if (!isBlockchainEnabled()) {
+      return res.json({
+        enabled: false,
+        message: "ADMIN_PRIVATE_KEY nincs beállítva — blokklánc-küldés inaktív",
+        address: null,
+        balance: null,
+      });
+    }
+    try {
+      const { address, balance } = await getAdminBalance();
+      res.json({ enabled: true, address, balance });
+    } catch (err: any) {
+      res.status(500).json({ enabled: true, error: err.message });
+    }
   });
 
   return httpServer;
