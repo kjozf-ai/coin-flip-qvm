@@ -11,10 +11,10 @@ export const QAN_TESTNET = {
   faucetUrl: "https://faucet.qanplatform.com",
 };
 
-// Contract addresses — replace after deployment
+// Contract addresses
 export const CONTRACTS = {
   js: {
-    address: "0x0000000000000000000000000000000000000000",
+    address: "0xC6DFb83410bAA0703447F019cC353441909579aE",
     language: "JavaScript",
     label: "CoinFlip-JS",
     description: "QVM JavaScript Smart Contract",
@@ -25,7 +25,7 @@ export const CONTRACTS = {
     randomImpl: "crypto.randomBytes(32) → QVM getrandom() syscall → block-hash derived bytes",
   },
   go: {
-    address: "0x0000000000000000000000000000000000000000",
+    address: "0x57e481642255925489c6da94CAD6CdfBFdde85b0",
     language: "Go (Golang)",
     label: "CoinFlip-Go",
     description: "QVM Golang Smart Contract",
