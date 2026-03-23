@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { randomBytes } from "crypto";
 import { storage } from "./storage";
-import { sendPrize, isBlockchainEnabled, getAdminBalance } from "./blockchain";
+import { sendPrize, isBlockchainEnabled, getAdminBalance, getBlockHashResult } from "./blockchain";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -28,7 +28,7 @@ export async function registerRoutes(
 
   // ── Create a new round (Admin) ────────────────────────────────────────
   app.post("/api/rounds", async (req, res) => {
-    const { entryFee, contractType } = req.body;
+    const { entryFee } = req.body;
     const current = storage.getCurrentRound();
     if (current && current.status === "open") {
       return res.status(400).json({ error: "Már van aktív kör" });
@@ -43,7 +43,7 @@ export async function registerRoutes(
       pool: "0",
       rolloverPool: rollover,
       totalPool: rollover, // starts with rollover
-      contractType: contractType || "js",
+      contractType: "qan",
       playerCount: 0,
       headsCount: 0,
       tailsCount: 0,
@@ -124,11 +124,32 @@ export async function registerRoutes(
     if (round.status !== "open") return res.status(400).json({ error: "A kör nem nyitott" });
     if ((round.playerCount || 0) < 1) return res.status(400).json({ error: "Nincs elég játékos" });
 
-    // Generate deterministic random (simulating QVM getrandom)
-    const randBuf = randomBytes(32);
-    const randomHex = randBuf.toString("hex").substring(0, 16);
-    const randomValue = parseInt(randomHex.substring(0, 8), 16);
-    const result = randomValue % 2 === 0 ? "heads" : "tails";
+    // ── Blokklánc-alapú véletlenszám (QVM getrandom() ekvivalens) ────────
+    // A QAN TestNet legutóbbi blokkjának hash-éből számoljuk az eredményt,
+    // pontosan ugyanazzal az algoritmussal, amit a QVM getrandom() syscall
+    // alkalmaz. Az eredmény így a block explorerrel bárki által ellenőrizhető.
+    let result: "heads" | "tails";
+    let randomHex: string;
+    let blockHash: string | null = null;
+    let blockNumber: number | null = null;
+    let blockExplorerUrl: string | null = null;
+
+    try {
+      const blockData = await getBlockHashResult();
+      result = blockData.result;
+      randomHex = blockData.randomHex;
+      blockHash = blockData.blockHash;
+      blockNumber = blockData.blockNumber;
+      blockExplorerUrl = blockData.explorerUrl;
+      console.log(`[closeRound] QAN blokk #${blockNumber} → eredmény: ${result}`);
+    } catch (err: any) {
+      // Fallback: ha a QAN RPC nem elérhető, szerveroldali véletlen
+      console.warn(`[closeRound] QAN RPC nem elérhető, fallback randomBytes: ${err.message}`);
+      const randBuf = randomBytes(32);
+      randomHex = randBuf.toString("hex").substring(0, 16);
+      const randomValue = parseInt(randomHex.substring(0, 8), 16);
+      result = randomValue % 2 === 0 ? "heads" : "tails";
+    }
 
     const allBets = storage.getBetsByRound(round.id);
     const winnerCount = allBets.filter(b => b.guess === result).length;
@@ -137,8 +158,7 @@ export async function registerRoutes(
       ? (totalPool / winnerCount).toFixed(4)
       : "0";
 
-    // If nobody won, all goes to accumulated pool
-    const unclaimedPrize = winnerCount === 0 ? totalPool.toFixed(4) : totalPool.toFixed(4);
+    const unclaimedPrize = totalPool.toFixed(4);
 
     storage.updateRound(round.id, {
       status: "closed",
@@ -146,7 +166,7 @@ export async function registerRoutes(
       winnerCount,
       prizePerWinner,
       randomHex,
-      unclaimedPrize: unclaimedPrize,
+      unclaimedPrize,
     });
 
     // Mark winning bets
@@ -173,7 +193,11 @@ export async function registerRoutes(
         totalPool: totalPool.toFixed(4),
         prizePerWinner,
         randomHex,
+        blockHash,
+        blockNumber,
+        blockExplorerUrl,
         nobodyWon: winnerCount === 0,
+        randomSource: blockHash ? "QAN TestNet block hash" : "server fallback",
       }),
       timestamp: Date.now(),
     });
@@ -185,6 +209,9 @@ export async function registerRoutes(
       winnerCount,
       prizePerWinner,
       randomHex,
+      blockHash,
+      blockNumber,
+      blockExplorerUrl,
       totalPool: totalPool.toFixed(4),
     });
   });
@@ -313,6 +340,19 @@ export async function registerRoutes(
   app.get("/api/events", async (_req, res) => {
     const limit = parseInt(_req.query.limit as string) || 50;
     res.json(storage.getRecentEvents(limit));
+  });
+
+  // ── Game wallet address (hova küldik a játékosok az entry fee-t) ─────
+  app.get("/api/game/address", async (_req, res) => {
+    if (!isBlockchainEnabled()) {
+      return res.json({ address: null, enabled: false });
+    }
+    try {
+      const { address } = await getAdminBalance();
+      res.json({ address, enabled: true });
+    } catch {
+      res.json({ address: null, enabled: false });
+    }
   });
 
   // ── Admin: blokklánc státusz és egyenleg ──────────────────────────────

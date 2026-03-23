@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useWallet } from "@/hooks/use-wallet";
-import { CONTRACTS, QAN_TESTNET, type ContractType } from "@/lib/qan-config";
+import { QAN_TESTNET } from "@/lib/qan-config";
 import type { Round, Bet, LeaderboardEntry, GameEvent } from "@shared/schema";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,9 +11,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { PerplexityAttribution } from "@/components/PerplexityAttribution";
 import {
-  Coins, Wallet, Trophy, Activity, Shield, Terminal,
+  Coins, Wallet, Trophy, Activity,
   CircleDot, ArrowUpCircle, ArrowDownCircle, Users,
-  ExternalLink, Zap, Code2, Globe, Lock
+  ExternalLink,
 } from "lucide-react";
 
 function shortenAddress(addr: string) {
@@ -65,87 +65,8 @@ function WalletConnect() {
   );
 }
 
-// ─── Contract Selector / QVM Showcase ───────────────────────────────────────
-function QVMShowcase({ selected, onSelect }: { selected: ContractType; onSelect: (t: ContractType) => void }) {
-  const contract = CONTRACTS[selected];
-  return (
-    <Card className="border-2 border-dashed border-primary/30">
-      <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-base flex items-center gap-2">
-            <Shield className="w-4 h-4 text-primary" />
-            QVM Showcase
-          </CardTitle>
-          <Badge variant="outline" className="text-xs">Post-Quantum VM</Badge>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <p className="text-sm text-muted-foreground">
-          A QVM egy többnyelvű, biztonságos, EVM-kompatibilis virtuális gép. Válassz contractot:
-        </p>
-
-        <div className="grid grid-cols-2 gap-2">
-          {(Object.keys(CONTRACTS) as ContractType[]).map((key) => (
-            <button
-              key={key}
-              onClick={() => onSelect(key)}
-              data-testid={`button-select-contract-${key}`}
-              className={`p-3 rounded-lg border text-left transition-all ${
-                selected === key
-                  ? "border-primary bg-primary/5"
-                  : "border-border hover:border-primary/40"
-              }`}
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <Code2 className="w-3.5 h-3.5" />
-                <span className="font-medium text-sm">{CONTRACTS[key].label}</span>
-              </div>
-              <span className="text-xs text-muted-foreground">{CONTRACTS[key].language}</span>
-            </button>
-          ))}
-        </div>
-
-        <div className="bg-card rounded-lg p-3 border space-y-2">
-          <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-            <Terminal className="w-3 h-3" />
-            QVM Technical Details — {contract.label}
-          </div>
-          <div className="space-y-1.5 text-xs font-mono">
-            <div>
-              <span className="text-muted-foreground">Syscalls: </span>
-              <span className="text-primary">{contract.syscalls.join(", ")}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground">Storage Read: </span>
-              <span className="text-foreground">{contract.storageRead}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground">Storage Write: </span>
-              <span className="text-foreground">{contract.storageWrite}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground">Random: </span>
-              <span className="text-foreground">{contract.randomImpl}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground">Compile: </span>
-              <span className="text-foreground">{contract.compileCmd}</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex gap-2 flex-wrap">
-          <Badge variant="secondary" className="text-xs"><Lock className="w-3 h-3 mr-1" />Post-Quantum</Badge>
-          <Badge variant="secondary" className="text-xs"><Globe className="w-3 h-3 mr-1" />EVM-Compatible</Badge>
-          <Badge variant="secondary" className="text-xs"><Zap className="w-3 h-3 mr-1" />Deterministic</Badge>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
 // ─── Game Lobby ─────────────────────────────────────────────────────────────
-function GameLobby({ selectedContract }: { selectedContract: ContractType }) {
+function GameLobby() {
   const { address, isConnected, isCorrectNetwork } = useWallet();
   const [guess, setGuess] = useState<"heads" | "tails" | null>(null);
   const [txStatus, setTxStatus] = useState<string | null>(null);
@@ -161,6 +82,10 @@ function GameLobby({ selectedContract }: { selectedContract: ContractType }) {
     refetchInterval: 5000,
   });
 
+  const { data: gameAddress } = useQuery<{ address: string | null; enabled: boolean }>({
+    queryKey: ["/api/game/address"],
+  });
+
   const { data: claimInfo } = useQuery<{ canClaim: boolean; amount?: string; reason?: string }>({
     queryKey: ["/api/claim", currentRound?.id, address],
     enabled: !!currentRound && currentRound.status === "closed" && !!address,
@@ -170,10 +95,10 @@ function GameLobby({ selectedContract }: { selectedContract: ContractType }) {
     mutationFn: async () => {
       let txHash: string | undefined;
 
-      // Ha van wallet, külj valódi tranzakciót
-      if (isConnected && isCorrectNetwork && (window as any).ethereum) {
+      // Ha van wallet és ismert a game wallet cím, külj valódi tranzakciót
+      if (isConnected && isCorrectNetwork && (window as any).ethereum && gameAddress?.address) {
         setTxStatus("MetaMask jóváhagyásra vár...");
-        const contractAddr = CONTRACTS[selectedContract].address;
+        const toAddr = gameAddress.address;
         const feeParts = (currentRound?.entryFee || "0.1").split(".");
         const whole = feeParts[0] || "0";
         const frac = (feeParts[1] || "").padEnd(18, "0").slice(0, 18);
@@ -183,7 +108,7 @@ function GameLobby({ selectedContract }: { selectedContract: ContractType }) {
         try {
           txHash = await (window as any).ethereum.request({
             method: "eth_sendTransaction",
-            params: [{ from: address, to: contractAddr, value: feeWei }],
+            params: [{ from: address, to: toAddr, value: feeWei }],
           });
           setTxStatus("Tranzakció elküldve!");
         } catch (e: any) {
@@ -320,15 +245,9 @@ function GameLobby({ selectedContract }: { selectedContract: ContractType }) {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <div className="flex items-center justify-between p-2 rounded bg-card border">
-                <span className="text-muted-foreground">Belépési díj:</span>
-                <span className="font-medium">{currentRound.entryFee} QANX</span>
-              </div>
-              <div className="flex items-center justify-between p-2 rounded bg-card border">
-                <span className="text-muted-foreground">Contract:</span>
-                <Badge variant="outline" className="text-xs">{CONTRACTS[selectedContract].label}</Badge>
-              </div>
+            <div className="flex items-center justify-between p-2 rounded bg-card border text-sm">
+              <span className="text-muted-foreground">Belépési díj:</span>
+              <span className="font-medium">{currentRound.entryFee} QANX</span>
             </div>
 
             <div className="flex items-center justify-between p-2 rounded bg-card border text-sm">
@@ -505,7 +424,7 @@ function Leaderboard() {
 }
 
 // ─── Admin Panel ────────────────────────────────────────────────────────────
-function AdminPanel({ selectedContract }: { selectedContract: ContractType }) {
+function AdminPanel() {
   const { address, isConnected } = useWallet();
   const { toast } = useToast();
   const [entryFee, setEntryFee] = useState("0.1");
@@ -517,11 +436,7 @@ function AdminPanel({ selectedContract }: { selectedContract: ContractType }) {
 
   const createRound = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/rounds", {
-        entryFee,
-        contractType: selectedContract,
-        contractAddress: CONTRACTS[selectedContract].address,
-      });
+      const res = await apiRequest("POST", "/api/rounds", { entryFee });
       return res.json();
     },
     onSuccess: () => {
@@ -543,10 +458,21 @@ function AdminPanel({ selectedContract }: { selectedContract: ContractType }) {
       queryClient.invalidateQueries({ queryKey: ["/api/rounds/current"] });
       queryClient.invalidateQueries({ queryKey: ["/api/events"] });
       queryClient.invalidateQueries({ queryKey: ["/api/leaderboard"] });
-      toast({
-        title: "Kör lezárva",
-        description: `Eredmény: ${data.result === "heads" ? "Fej" : "Írás"} — ${data.winnerCount} nyertes`,
-      });
+
+      const eredmeny = data.result === "heads" ? "Fej" : "Írás";
+      if (data.blockExplorerUrl) {
+        // Blokklánc-alapú eredmény — megnyitjuk a block explorert
+        toast({
+          title: `🔗 Kör lezárva — ${eredmeny}`,
+          description: `${data.winnerCount} nyertes | Blokk #${data.blockNumber} | ${data.randomHex?.substring(0, 12)}...`,
+        });
+        window.open(data.blockExplorerUrl, "_blank");
+      } else {
+        toast({
+          title: `Kör lezárva — ${eredmeny}`,
+          description: `${data.winnerCount} nyertes`,
+        });
+      }
     },
     onError: (err: Error) => {
       toast({ title: "Hiba", description: err.message, variant: "destructive" });
@@ -557,7 +483,6 @@ function AdminPanel({ selectedContract }: { selectedContract: ContractType }) {
     <Card>
       <CardHeader className="pb-3">
         <CardTitle className="text-base flex items-center gap-2">
-          <Shield className="w-4 h-4 text-primary" />
           Admin Panel
         </CardTitle>
       </CardHeader>
@@ -605,8 +530,8 @@ function AdminPanel({ selectedContract }: { selectedContract: ContractType }) {
                 <div className="flex items-center gap-2">
                   <Badge>{currentRound.result === "heads" ? "Fej" : "Írás"}</Badge>
                   <span className="text-xs text-muted-foreground">{currentRound.winnerCount} nyertes</span>
-                  <span className="text-xs font-mono text-muted-foreground">
-                    Random: {currentRound.randomHex?.substring(0, 12)}...
+                  <span className="text-xs font-mono text-muted-foreground" title="QAN TestNet blokk hash alapú eredmény">
+                    ⛓ {currentRound.randomHex?.substring(0, 12)}...
                   </span>
                 </div>
               </div>
@@ -649,7 +574,6 @@ function RoundHistory() {
                 <div className="flex items-center gap-3 text-xs text-muted-foreground">
                   <span><Users className="w-3 h-3 inline mr-1" />{round.playerCount}</span>
                   <span>{formatQANX(round.pool)} QANX</span>
-                  <Badge variant="outline" className="text-[10px]">{round.contractType?.toUpperCase()}</Badge>
                 </div>
               </div>
             ))}
@@ -662,8 +586,6 @@ function RoundHistory() {
 
 // ─── Main Page ──────────────────────────────────────────────────────────────
 export default function Home() {
-  const [selectedContract, setSelectedContract] = useState<ContractType>("js");
-
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
@@ -675,7 +597,7 @@ export default function Home() {
             </div>
             <div>
               <h1 className="font-semibold text-sm leading-none">QAN CoinFlip</h1>
-              <p className="text-[11px] text-muted-foreground hidden sm:block">QVM Multi-Language Demo</p>
+              <p className="text-[11px] text-muted-foreground hidden sm:block">QAN TestNet CoinFlip</p>
             </div>
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
@@ -707,15 +629,14 @@ export default function Home() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 py-6">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Left Column: QVM Showcase + Admin */}
+          {/* Left Column: Admin */}
           <div className="lg:col-span-4 space-y-4">
-            <QVMShowcase selected={selectedContract} onSelect={setSelectedContract} />
-            <AdminPanel selectedContract={selectedContract} />
+            <AdminPanel />
           </div>
 
           {/* Center Column: Game Lobby */}
           <div className="lg:col-span-4 space-y-4">
-            <GameLobby selectedContract={selectedContract} />
+            <GameLobby />
             <RoundHistory />
           </div>
 
@@ -736,46 +657,18 @@ export default function Home() {
           </div>
         </div>
 
-        {/* QVM Info Banner */}
+        {/* QAN Info Banner */}
         <div className="mt-8 p-4 rounded-lg bg-card border">
           <div className="flex items-start gap-3">
-            <Shield className="w-5 h-5 text-primary mt-0.5 flex-shrink-0" />
+            <Coins className="w-5 h-5 text-primary mt-0.5 flex-shrink-0" />
             <div className="space-y-1">
-              <h3 className="text-sm font-semibold">A QVM-ről</h3>
+              <h3 className="text-sm font-semibold">A QAN TestNet-ről</h3>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                A QAN Virtual Machine (QVM) a világ első auditált virtuális gépe, amely lehetővé teszi
-                smart contractok fejlesztését bármely programozási nyelven a blokkláncon.
-                A QVM a Linux ELF binárisokat hajtja végre determinisztikus módon, hardverszintű sandbox-ban.
-                A <code className="text-primary">getrandom()</code> syscall az előző blokk hash-éből származtatott determinisztikus byte-sorozatot ad vissza.
-                A <code className="text-primary">time()</code> syscall az előző blokk timestamp-jét adja.
-                Ez a demo két különböző nyelven (JavaScript és Go) mutatja be ugyanazt a CoinFlip logikát.
+                A QAN TestNet egy post-quantum biztonságú, EVM-kompatibilis blokklánc.
+                Az eredmény mindig a QAN TestNet legutóbbi blokkjának hash-éből kerül kiszámításra,
+                így bárki ellenőrizheti a <a href={QAN_TESTNET.blockExplorerUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">QAN Block Exploreren</a>.
+                Teszt QANX token a <a href={QAN_TESTNET.faucetUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">fauceten</a> igényelhető.
               </p>
-              <div className="flex gap-2 pt-1">
-                <a
-                  href="https://learn.qanplatform.com/developers/qvm-multi-language-smart-contracts"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs text-primary hover:underline flex items-center gap-1"
-                >
-                  <ExternalLink className="w-3 h-3" />QVM Docs
-                </a>
-                <a
-                  href="https://docs.qanplatform.com/testnet/smart-contract/writing/javascript"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs text-primary hover:underline flex items-center gap-1"
-                >
-                  <ExternalLink className="w-3 h-3" />JS Contract
-                </a>
-                <a
-                  href="https://docs.qanplatform.com/testnet/smart-contract/writing/go"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs text-primary hover:underline flex items-center gap-1"
-                >
-                  <ExternalLink className="w-3 h-3" />Go Contract
-                </a>
-              </div>
             </div>
           </div>
         </div>
@@ -785,7 +678,7 @@ export default function Home() {
       <footer className="border-t mt-12 py-6">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-muted-foreground">
           <div className="flex items-center gap-4">
-            <span>QAN CoinFlip MVP — QVM Multi-Language Demo</span>
+            <span>QAN CoinFlip — QAN TestNet</span>
             <span>Chain ID: {QAN_TESTNET.chainId}</span>
           </div>
           <PerplexityAttribution />
