@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { PerplexityAttribution } from "@/components/PerplexityAttribution";
 import {
-  Coins, Wallet, Trophy, Activity,
+  Coins, Wallet, Trophy, Activity, Zap,
   CircleDot, ArrowUpCircle, ArrowDownCircle, Users,
   ExternalLink,
 } from "lucide-react";
