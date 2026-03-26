@@ -24,6 +24,8 @@ export interface IStorage {
   getBetByAddressAndRound(address: string, roundId: number): Bet | undefined;
   updateBet(id: number, data: Partial<InsertBet>): void;
   updateBetsWon(roundId: number, result: string): void;
+  /** All unclaimed winning bets for a given wallet address (across all rounds). */
+  getUnclaimedBetsForAddress(address: string): Bet[];
   getLeaderboard(limit: number): LeaderboardEntry[];
   upsertLeaderboardEntry(address: string, won: boolean, prize: string): void;
   createEvent(event: { type: string; roundId?: number | null; playerAddress?: string | null; data?: string | null; timestamp: number }): GameEvent;
@@ -69,6 +71,11 @@ export class DatabaseStorage implements IStorage {
       .set({ won: 1 })
       .where(sql`${bets.roundId} = ${roundId} AND ${bets.guess} = ${result}`)
       .run();
+  }
+  getUnclaimedBetsForAddress(address: string): Bet[] {
+    return db.select().from(bets)
+      .where(sql`lower(${bets.playerAddress}) = lower(${address}) AND ${bets.won} = 1 AND ${bets.claimed} = 0`)
+      .all();
   }
   getLeaderboard(limit: number): LeaderboardEntry[] {
     return db.select().from(leaderboard).orderBy(desc(leaderboard.wins)).limit(limit).all();
