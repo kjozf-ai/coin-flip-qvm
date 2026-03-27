@@ -728,6 +728,7 @@ function AdminPanel() {
   const [showEmergency, setShowEmergency] = useState(false);
   const [durationInput, setDurationInput] = useState("");
 
+  // All hooks must be called unconditionally (Rules of Hooks)
   const { data: currentRound } = useQuery<Round | null>({
     queryKey: ["/api/rounds/current"],
     refetchInterval: 5000,
@@ -738,15 +739,6 @@ function AdminPanel() {
     refetchInterval: 15000,
     enabled: isConnected,
   });
-
-  // Only render if the connected wallet matches the game/admin wallet
-  const isAdmin =
-    isConnected &&
-    !!address &&
-    !!adminBalance?.address &&
-    address.toLowerCase() === adminBalance.address.toLowerCase();
-
-  if (!isAdmin) return null;
 
   const { data: poolData } = useQuery<PoolData>({
     queryKey: ["/api/pool"],
@@ -808,6 +800,15 @@ function AdminPanel() {
   });
 
   const activeDurationMin = gameConfig ? gameConfig.roundDurationMs / 60_000 : 3;
+
+  // Only show panel for the admin/game wallet — checked AFTER all hooks
+  const isAdmin =
+    isConnected &&
+    !!address &&
+    !!adminBalance?.address &&
+    address.toLowerCase() === adminBalance.address.toLowerCase();
+
+  if (!isAdmin) return null;
 
   return (
     <Card className="border border-white/8 bg-card/80">
