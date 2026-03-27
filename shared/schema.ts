@@ -58,6 +58,7 @@ export const gameConfig = sqliteTable("game_config", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   adminAddress: text("admin_address"),
   accumulatedPool: text("accumulated_pool").notNull().default("0"), // unclaimed prizes rolling over
+  jackpotPool: text("jackpot_pool").notNull().default("0"),          // 5% per round, fires every 10 rounds
 });
 
 export const insertRoundSchema = createInsertSchema(rounds).omit({ id: true });

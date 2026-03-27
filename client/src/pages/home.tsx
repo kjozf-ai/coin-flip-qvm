@@ -12,7 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Coins, Wallet, Trophy, Activity, Zap,
   CircleDot, Users, ExternalLink, Shield, ChevronRight,
-  Clock, TrendingUp,
+  Clock, TrendingUp, Sparkles,
 } from "lucide-react";
 
 // ─── Constants (mirrored from server) ────────────────────────────────────────
@@ -517,6 +517,83 @@ function PendingPrizes() {
   );
 }
 
+// ─── Jackpot Widget ───────────────────────────────────────────────────────────
+interface PoolData {
+  accumulated: string;
+  jackpotPool: string;
+  closedRoundCount: number;
+  jackpotInterval: number;
+  roundsUntilJackpot: number;
+}
+
+function JackpotWidget() {
+  const { data: poolData } = useQuery<PoolData>({
+    queryKey: ["/api/pool"],
+    refetchInterval: 8000,
+  });
+
+  const jackpot        = parseFloat(poolData?.jackpotPool    || "0");
+  const interval       = poolData?.jackpotInterval           ?? 10;
+  const closed         = poolData?.closedRoundCount          ?? 0;
+  const until          = poolData?.roundsUntilJackpot        ?? interval;
+  const completed      = closed % interval;   // rounds already done in this cycle
+  const progress       = interval > 0 ? (completed / interval) * 100 : 0;
+  const isImminent     = until <= 2 && until > 0;
+
+  return (
+    <Card className={`border backdrop-blur-sm ${isImminent ? "border-yellow-400/40 bg-yellow-500/5" : "border-violet-500/25 bg-violet-500/5"}`}>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Sparkles className={`w-4 h-4 ${isImminent ? "text-yellow-400 animate-pulse" : "text-violet-400"}`} />
+          Jackpot Fund
+          {isImminent && (
+            <Badge className="bg-yellow-500/20 border border-yellow-500/30 text-yellow-300 text-[10px] animate-pulse">
+              SOON!
+            </Badge>
+          )}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {/* Current jackpot amount */}
+        <div className={`p-3 rounded-xl text-center border ${isImminent ? "bg-yellow-500/10 border-yellow-500/25" : "bg-violet-500/8 border-violet-500/20"}`}>
+          <div className={`text-3xl font-black ${isImminent ? "text-yellow-300" : "text-violet-300"}`}>
+            {jackpot.toFixed(4)}
+          </div>
+          <div className="text-xs text-muted-foreground mt-0.5">QANX accumulated</div>
+        </div>
+
+        {/* Progress bar */}
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-muted-foreground flex items-center gap-1">
+              <Clock className="w-3 h-3" />
+              Rounds this cycle
+            </span>
+            <span className={`font-mono font-bold ${isImminent ? "text-yellow-300" : "text-violet-300"}`}>
+              {completed} / {interval}
+            </span>
+          </div>
+          <div className="h-2 rounded-full bg-white/8 overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-700 ${
+                isImminent
+                  ? "bg-gradient-to-r from-yellow-400 to-amber-300"
+                  : "bg-gradient-to-r from-violet-500 to-purple-400"
+              }`}
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+          <p className="text-[10px] text-muted-foreground">
+            {until === 0
+              ? "🎰 Jackpot fires this round!"
+              : `${until} more round${until !== 1 ? "s" : ""} until jackpot fires`}
+          </p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ─── Event Log ───────────────────────────────────────────────────────────────
 function EventLog() {
   const { data: events } = useQuery<GameEvent[]>({
@@ -526,12 +603,13 @@ function EventLog() {
 
   const eventIcon = (type: string) => {
     switch (type) {
-      case "GameStarted":  return <Zap className="w-3.5 h-3.5 text-emerald-400" />;
-      case "BetPlaced":    return <Coins className="w-3.5 h-3.5 text-cyan-400" />;
-      case "GameFinished": return <Trophy className="w-3.5 h-3.5 text-amber-400" />;
-      case "PrizeClaimed": return <Zap className="w-3.5 h-3.5 text-violet-400" />;
-      case "RoundSkipped": return <CircleDot className="w-3.5 h-3.5 text-muted-foreground" />;
-      default:             return <Activity className="w-3.5 h-3.5 text-muted-foreground" />;
+      case "GameStarted":      return <Zap className="w-3.5 h-3.5 text-emerald-400" />;
+      case "BetPlaced":        return <Coins className="w-3.5 h-3.5 text-cyan-400" />;
+      case "GameFinished":     return <Trophy className="w-3.5 h-3.5 text-amber-400" />;
+      case "PrizeClaimed":     return <Zap className="w-3.5 h-3.5 text-violet-400" />;
+      case "RoundSkipped":     return <CircleDot className="w-3.5 h-3.5 text-muted-foreground" />;
+      case "JackpotTriggered": return <Sparkles className="w-3.5 h-3.5 text-yellow-400" />;
+      default:                 return <Activity className="w-3.5 h-3.5 text-muted-foreground" />;
     }
   };
 
@@ -645,7 +723,7 @@ function Leaderboard() {
 
 // ─── Admin Panel (minimal — rounds are automatic) ─────────────────────────────
 function AdminPanel() {
-  const { isConnected } = useWallet();
+  const { address, isConnected } = useWallet();
   const { toast } = useToast();
   const [showEmergency, setShowEmergency] = useState(false);
   const [durationInput, setDurationInput] = useState("");
@@ -661,7 +739,16 @@ function AdminPanel() {
     enabled: isConnected,
   });
 
-  const { data: poolData } = useQuery<{ accumulated: string }>({
+  // Only render if the connected wallet matches the game/admin wallet
+  const isAdmin =
+    isConnected &&
+    !!address &&
+    !!adminBalance?.address &&
+    address.toLowerCase() === adminBalance.address.toLowerCase();
+
+  if (!isAdmin) return null;
+
+  const { data: poolData } = useQuery<PoolData>({
     queryKey: ["/api/pool"],
     refetchInterval: 10000,
   });
@@ -736,6 +823,17 @@ function AdminPanel() {
           <div className="flex items-center justify-between p-2.5 rounded-lg bg-amber-500/8 border border-amber-500/20 text-xs">
             <span className="text-muted-foreground">Rollover pool</span>
             <span className="font-mono text-amber-400 font-semibold">{poolData?.accumulated} QANX</span>
+          </div>
+        )}
+
+        {/* Jackpot pool teaser */}
+        {parseFloat(poolData?.jackpotPool || "0") > 0 && (
+          <div className="flex items-center justify-between p-2.5 rounded-lg bg-violet-500/8 border border-violet-500/20 text-xs">
+            <span className="text-muted-foreground flex items-center gap-1">
+              <Sparkles className="w-3 h-3 text-violet-400" />
+              Jackpot fund
+            </span>
+            <span className="font-mono text-violet-300 font-semibold">{poolData?.jackpotPool} QANX</span>
           </div>
         )}
 
@@ -930,7 +1028,7 @@ export default function Home() {
             <div>
               <h1 className="font-bold text-sm leading-none gradient-text">QAN CoinFlip</h1>
               <p className="text-[11px] text-muted-foreground hidden sm:block">
-                Auto rounds · 1 QANX entry · 90% to winners
+                Auto rounds · 1 QANX entry · 90% winners · 5% jackpot
               </p>
             </div>
           </div>
@@ -960,9 +1058,10 @@ export default function Home() {
             <AdminPanel />
           </div>
 
-          {/* Center: Prizes + History */}
+          {/* Center: Prizes + Jackpot + History */}
           <div className="lg:col-span-4 space-y-4">
             <PendingPrizes />
+            <JackpotWidget />
             <RoundHistory />
           </div>
 
@@ -983,24 +1082,88 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Info banner */}
-        <div className="mt-8 p-4 rounded-xl bg-white/3 border border-white/8">
-          <div className="flex items-start gap-3">
-            <Shield className="w-5 h-5 text-cyan-400 mt-0.5 shrink-0" />
-            <div className="space-y-1">
-              <h3 className="text-sm font-semibold text-foreground/90">About QAN TestNet</h3>
+        {/* ── How It Works ──────────────────────────────────────────── */}
+        <div className="mt-8 rounded-2xl border border-white/10 bg-white/3 overflow-hidden">
+          <div className="px-5 py-4 border-b border-white/8 flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-cyan-400" />
+            <h3 className="font-semibold text-sm text-foreground/90">How It Works</h3>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-0 divide-y sm:divide-y-0 sm:divide-x divide-white/8">
+
+            {/* Step 1 */}
+            <div className="px-5 py-4 space-y-1.5">
+              <div className="w-7 h-7 rounded-lg bg-cyan-500/15 border border-cyan-500/25 flex items-center justify-center text-xs font-bold text-cyan-400 mb-2">1</div>
+              <h4 className="text-sm font-semibold text-foreground/80">Join a Round</h4>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                QAN TestNet is a post-quantum secure, EVM-compatible blockchain. Every coin flip
-                result is derived from the latest QAN block hash — fully verifiable on the{" "}
-                <a href={QAN_TESTNET.blockExplorerUrl} target="_blank" rel="noopener noreferrer"
-                  className="text-cyan-400 hover:text-cyan-300 hover:underline">QAN Block Explorer</a>.
-                Test QANX tokens available at the{" "}
-                <a href={QAN_TESTNET.faucetUrl} target="_blank" rel="noopener noreferrer"
-                  className="text-cyan-400 hover:text-cyan-300 hover:underline">faucet</a>.
-                Rounds run every 5 minutes · 1 QANX fixed entry fee · 10% house commission ·
-                90% distributed to winners.
+                Rounds open automatically every few minutes. Pay <span className="text-cyan-300 font-semibold">1 QANX</span> and pick Heads or Tails.
+                You can join multiple rounds — your prizes persist until you claim them.
               </p>
             </div>
+
+            {/* Step 2 */}
+            <div className="px-5 py-4 space-y-1.5">
+              <div className="w-7 h-7 rounded-lg bg-amber-500/15 border border-amber-500/25 flex items-center justify-center text-xs font-bold text-amber-400 mb-2">2</div>
+              <h4 className="text-sm font-semibold text-foreground/80">Fair Randomness</h4>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                At close time the result is determined by the latest <span className="text-amber-300 font-semibold">QAN block hash</span> — publicly verifiable
+                on the block explorer. No server can manipulate the outcome.
+              </p>
+            </div>
+
+            {/* Step 3 — prize split */}
+            <div className="px-5 py-4 space-y-1.5">
+              <div className="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center text-xs font-bold text-emerald-400 mb-2">3</div>
+              <h4 className="text-sm font-semibold text-foreground/80">Prize Split</h4>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Every round's pot is split three ways:
+              </p>
+              <ul className="text-xs space-y-1 mt-1">
+                <li className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                  <span className="text-emerald-300 font-semibold">90%</span>
+                  <span className="text-muted-foreground">— divided equally among all winners</span>
+                </li>
+                <li className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-violet-400 shrink-0" />
+                  <span className="text-violet-300 font-semibold">5%</span>
+                  <span className="text-muted-foreground">— into the 🎰 Jackpot Fund</span>
+                </li>
+                <li className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground shrink-0" />
+                  <span className="text-muted-foreground font-semibold">5%</span>
+                  <span className="text-muted-foreground">— house fee (keeps the lights on)</span>
+                </li>
+              </ul>
+              <p className="text-xs text-muted-foreground mt-1">
+                If nobody wins, the entire 90% rolls over into the next round's pot.
+              </p>
+            </div>
+
+            {/* Step 4 — jackpot */}
+            <div className="px-5 py-4 space-y-1.5">
+              <div className="w-7 h-7 rounded-lg bg-violet-500/15 border border-violet-500/25 flex items-center justify-center text-xs font-bold text-violet-400 mb-2">4</div>
+              <h4 className="text-sm font-semibold text-foreground/80">Jackpot Bonus</h4>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                The Jackpot Fund grows with every round: <span className="text-violet-300 font-semibold">5% of each pot</span> accumulates silently.
+                Every <span className="text-yellow-300 font-semibold">10th closed round</span> the entire fund is injected into the next round's prize pool —
+                creating a sudden mega-pot. The Jackpot Widget above shows real-time progress.
+              </p>
+            </div>
+          </div>
+
+          {/* Footer note */}
+          <div className="px-5 py-3 border-t border-white/8 flex items-start gap-2.5 bg-white/2">
+            <Shield className="w-3.5 h-3.5 text-cyan-400 mt-0.5 shrink-0" />
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              QAN TestNet is a <span className="text-cyan-300">post-quantum secure</span>, EVM-compatible blockchain.
+              Results are verifiable on the{" "}
+              <a href={QAN_TESTNET.blockExplorerUrl} target="_blank" rel="noopener noreferrer"
+                className="text-cyan-400 hover:text-cyan-300 hover:underline">QAN Block Explorer</a>.
+              Test QANX available at the{" "}
+              <a href={QAN_TESTNET.faucetUrl} target="_blank" rel="noopener noreferrer"
+                className="text-cyan-400 hover:text-cyan-300 hover:underline">faucet</a>.
+            </p>
           </div>
         </div>
       </main>

@@ -17,7 +17,10 @@ import { getBlockHashResult } from "./blockchain";
 // ─── Constants ────────────────────────────────────────────────────────────────
 export const DEFAULT_ROUND_DURATION_MS = 3 * 60 * 1000; // 3 minutes (default)
 export const FIXED_ENTRY_FEE           = "1.0";           // QANX per round
-export const COMMISSION_PERCENT        = 0.10;             // 10% house cut
+export const COMMISSION_PERCENT        = 0.10;             // 10% total: 5% house + 5% jackpot fund
+export const HOUSE_PERCENT             = 0.05;             // goes to game wallet
+export const JACKPOT_PERCENT           = 0.05;             // accumulates, fires every N rounds
+export const JACKPOT_INTERVAL          = 10;               // jackpot fires every 10 closed rounds
 const POST_CLOSE_DELAY_MS              = 15_000;           // 15 s gap between rounds
 
 /** Mutable — can be changed at runtime via the admin API. Resets to default on restart. */
@@ -85,12 +88,14 @@ export async function executeCloseRound(roundId: number): Promise<{
   }
 
   // ── Pool & commission calculation ──────────────────────────────────────────
-  const allBets        = storage.getBetsByRound(roundId);
-  const totalPool      = parseFloat(round.totalPool || round.pool);
-  const commission     = totalPool * COMMISSION_PERCENT;
-  const distributedPool= totalPool - commission;
-  const winnerCount    = allBets.filter(b => b.guess === result).length;
-  const prizePerWinner = winnerCount > 0
+  const allBets            = storage.getBetsByRound(roundId);
+  const totalPool          = parseFloat(round.totalPool || round.pool);
+  const houseCommission    = totalPool * HOUSE_PERCENT;      // 5% → game wallet
+  const jackpotContrib     = totalPool * JACKPOT_PERCENT;    // 5% → jackpot fund
+  const commission         = totalPool * COMMISSION_PERCENT; // 10% total (info only)
+  const distributedPool    = totalPool - commission;         // 90% split among winners
+  const winnerCount        = allBets.filter(b => b.guess === result).length;
+  const prizePerWinner     = winnerCount > 0
     ? (distributedPool / winnerCount).toFixed(4)
     : "0";
 
@@ -118,7 +123,29 @@ export async function executeCloseRound(roundId: number): Promise<{
     const acc = parseFloat(storage.getAccumulatedPool());
     storage.setAccumulatedPool((acc + distributedPool).toFixed(4));
   }
-  // Commission (10%) stays in the game wallet — no further accounting needed.
+
+  // ── Jackpot fund: accumulate 5% of every round ────────────────────────────
+  storage.addToJackpotPool(jackpotContrib.toFixed(4));
+  console.log(`[roundManager] Jackpot +${jackpotContrib.toFixed(4)} QANX (total: ${storage.getJackpotPool()})`);
+
+  // Every JACKPOT_INTERVAL closed rounds → flush jackpot into accumulated pool
+  const closedCount = storage.getClosedRoundCount();
+  let jackpotTriggered = false;
+  let jackpotAmount    = "0";
+  if (closedCount % JACKPOT_INTERVAL === 0) {
+    jackpotAmount    = storage.flushJackpotToAccumulated();
+    jackpotTriggered = parseFloat(jackpotAmount) > 0;
+    if (jackpotTriggered) {
+      console.log(`[roundManager] 🎰 JACKPOT triggered! ${jackpotAmount} QANX added to next round's pool.`);
+      storage.createEvent({
+        type:    "JackpotTriggered",
+        roundId,
+        data:    JSON.stringify({ amount: jackpotAmount, closedCount }),
+        timestamp: Date.now(),
+      });
+    }
+  }
+  // House commission (5%) stays in the game wallet — no further accounting needed.
 
   // ── Event log ──────────────────────────────────────────────────────────────
   storage.createEvent({
@@ -129,6 +156,8 @@ export async function executeCloseRound(roundId: number): Promise<{
       winnerCount,
       totalPool:        totalPool.toFixed(4),
       commission:       commission.toFixed(4),
+      houseCommission:  houseCommission.toFixed(4),
+      jackpotContrib:   jackpotContrib.toFixed(4),
       distributedPool:  distributedPool.toFixed(4),
       prizePerWinner,
       randomHex,
@@ -137,6 +166,8 @@ export async function executeCloseRound(roundId: number): Promise<{
       blockExplorerUrl,
       nobodyWon:        winnerCount === 0,
       randomSource:     blockHash ? "QAN TestNet block hash" : "server fallback",
+      jackpotTriggered,
+      jackpotAmount,
     }),
     timestamp: Date.now(),
   });

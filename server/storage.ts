@@ -11,6 +11,11 @@ import { eq, desc, sql, and } from "drizzle-orm";
 
 const sqlite = new Database("data.db");
 sqlite.pragma("journal_mode = WAL");
+
+// ── Schema migrations for existing databases ──────────────────────────────────
+// SQLite allows ADD COLUMN safely; throws if already exists — we ignore that.
+try { sqlite.exec("ALTER TABLE game_config ADD COLUMN jackpot_pool TEXT NOT NULL DEFAULT '0'"); } catch {}
+
 export const db = drizzle(sqlite);
 
 export interface IStorage {
@@ -32,6 +37,10 @@ export interface IStorage {
   getRecentEvents(limit: number): GameEvent[];
   getAccumulatedPool(): string;
   setAccumulatedPool(amount: string): void;
+  getJackpotPool(): string;
+  addToJackpotPool(amount: string): void;
+  flushJackpotToAccumulated(): string; // moves jackpot → accumulated, returns flushed amount
+  getClosedRoundCount(): number;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -115,6 +124,39 @@ export class DatabaseStorage implements IStorage {
     } else {
       db.insert(gameConfig).values({ accumulatedPool: amount }).run();
     }
+  }
+  getJackpotPool(): string {
+    const config = db.select().from(gameConfig).limit(1).get();
+    return config?.jackpotPool || "0";
+  }
+  addToJackpotPool(amount: string): void {
+    const config = db.select().from(gameConfig).limit(1).get();
+    const current = parseFloat(config?.jackpotPool || "0");
+    const next    = (current + parseFloat(amount)).toFixed(4);
+    if (config) {
+      db.update(gameConfig).set({ jackpotPool: next }).where(eq(gameConfig.id, config.id)).run();
+    } else {
+      db.insert(gameConfig).values({ jackpotPool: next }).run();
+    }
+  }
+  flushJackpotToAccumulated(): string {
+    const config  = db.select().from(gameConfig).limit(1).get();
+    const jackpot = config?.jackpotPool || "0";
+    if (parseFloat(jackpot) <= 0) return "0";
+    const newAccum = (parseFloat(config?.accumulatedPool || "0") + parseFloat(jackpot)).toFixed(4);
+    db.update(gameConfig)
+      .set({ accumulatedPool: newAccum, jackpotPool: "0" })
+      .where(eq(gameConfig.id, config!.id))
+      .run();
+    return jackpot;
+  }
+  getClosedRoundCount(): number {
+    const row = db
+      .select({ count: sql<number>`count(*)` })
+      .from(rounds)
+      .where(sql`${rounds.status} = 'closed'`)
+      .get();
+    return row?.count ?? 0;
   }
 }
 

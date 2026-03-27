@@ -9,6 +9,7 @@ import {
   DEFAULT_ROUND_DURATION_MS,
   FIXED_ENTRY_FEE,
   COMMISSION_PERCENT,
+  JACKPOT_INTERVAL,
 } from "./roundManager";
 
 export async function registerRoutes(
@@ -47,9 +48,17 @@ export async function registerRoutes(
     res.json(storage.getRecentRounds(limit));
   });
 
-  // ── Get accumulated pool ──────────────────────────────────────────────
+  // ── Get accumulated + jackpot pool info ──────────────────────────────
   app.get("/api/pool", async (_req, res) => {
-    res.json({ accumulated: storage.getAccumulatedPool() });
+    const closedCount        = storage.getClosedRoundCount();
+    const roundsUntilJackpot = JACKPOT_INTERVAL - (closedCount % JACKPOT_INTERVAL);
+    res.json({
+      accumulated:         storage.getAccumulatedPool(),
+      jackpotPool:         storage.getJackpotPool(),
+      closedRoundCount:    closedCount,
+      jackpotInterval:     JACKPOT_INTERVAL,
+      roundsUntilJackpot:  roundsUntilJackpot === JACKPOT_INTERVAL ? 0 : roundsUntilJackpot,
+    });
   });
 
   // ── Game config info ──────────────────────────────────────────────────
