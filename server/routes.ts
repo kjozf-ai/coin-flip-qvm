@@ -121,7 +121,7 @@ export async function registerRoutes(
       type:          "BetPlaced",
       roundId,
       playerAddress,
-      data:          JSON.stringify({ guess, pool: newPool, totalPool: newTotalPool, txHash }),
+      data:          JSON.stringify({ pool: newPool, totalPool: newTotalPool, txHash }),
       timestamp:     Date.now(),
     });
 

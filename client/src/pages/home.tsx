@@ -643,7 +643,6 @@ function EventLog() {
                     {evt.playerAddress && (
                       <div className="text-muted-foreground font-mono truncate">{shortenAddress(evt.playerAddress)}</div>
                     )}
-                    {data.guess   && <span className="text-muted-foreground">Guess: {data.guess === "heads" ? "Heads" : "Tails"}</span>}
                     {data.result  && (
                       <span className="text-muted-foreground"> · Result: <span className={data.result === "heads" ? "text-amber-400" : "text-violet-400"}>
                         {data.result === "heads" ? "Heads" : "Tails"}</span>
